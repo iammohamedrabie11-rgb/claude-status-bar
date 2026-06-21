@@ -60,6 +60,18 @@ fi
 echo "Built $APP"
 
 if [[ "${1:-}" == "--dmg" ]]; then
+  # Notarize + staple the APP (not the DMG). Stapling a DMG re-mounts it and macOS recreates
+  # a .fseventsd folder inside; stapling the app avoids that, the image stays clean.
+  if [[ "${SKIP_NOTARIZE:-}" != "1" && -n "$SIGN_ID" ]]; then
+    echo "Notarizing the app via profile '$NOTARY_PROFILE' (can take a minute)…"
+    rm -f build/app-notarize.zip
+    ditto -c -k --keepParent "$APP" build/app-notarize.zip
+    xcrun notarytool submit build/app-notarize.zip --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$APP"
+    rm -f build/app-notarize.zip
+    echo "App notarized + stapled."
+  fi
+
   echo "Packaging DMG…"
   DMG="build/ClaudeStatusBar.dmg"
   STAGE="build/dmg-stage"
@@ -92,22 +104,15 @@ tell application "Finder"
   end tell
 end tell
 OSA
+  # Strip macOS junk right before detach. No DMG stapling happens after this, so it stays gone.
   rm -rf "/Volumes/Claude Status Bar/.fseventsd" "/Volumes/Claude Status Bar/.Trashes" 2>/dev/null || true
   sync; sleep 1
   hdiutil detach "$device" >/dev/null || true
   hdiutil convert build/rw.dmg -format UDZO -o "$DMG" >/dev/null
   rm -rf build/rw.dmg "$STAGE"
 
-  if [[ "${SKIP_NOTARIZE:-}" == "1" ]]; then
-    echo "Skipped notarization (SKIP_NOTARIZE=1) — layout test only, not for distribution."
-  elif [[ -n "$SIGN_ID" ]]; then
-    codesign --force --timestamp --sign "$SIGN_ID" "$DMG"
-    echo "Notarizing via profile '$NOTARY_PROFILE' (can take a minute)…"
-    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$DMG"
-    echo "Notarized + stapled."
-  else
-    echo "DMG is unsigned — users will need right-click > Open the first time."
-  fi
+  # Sign the DMG (no staple => no re-mount => no .fseventsd). The app inside is already stapled.
+  [[ -n "$SIGN_ID" ]] && codesign --force --timestamp --sign "$SIGN_ID" "$DMG"
+  [[ "${SKIP_NOTARIZE:-}" == "1" ]] && echo "SKIP_NOTARIZE=1 — app NOT notarized (layout test only)."
   echo "Built $DMG"
 fi
