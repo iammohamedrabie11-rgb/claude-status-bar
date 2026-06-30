@@ -220,6 +220,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         var started: Bool       // true once the session had real activity (a prompt/tool); a merely-opened
                                 // conversation seeds started=false and stays out of the dropdown.
         var startedAt: Double, ts: Double
+        var gitBranch: String = ""  // current git branch of the session's cwd ("" if not a repo) — part of the locked state contract (STATE.md)
         var eff: String = ""   // effective state, recomputed once per tick in evaluate()
 
         init(json o: [String: Any], id: String) {
@@ -234,6 +235,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             self.started = o["started"] as? Bool ?? false
             self.startedAt = (o["startedAt"] as? NSNumber)?.doubleValue ?? 0
             self.ts = (o["ts"] as? NSNumber)?.doubleValue ?? 0
+            self.gitBranch = o["git_branch"] as? String ?? ""
         }
     }
     var sessions: [String: Session] = [:]  // id -> latest parsed per-session state
