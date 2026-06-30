@@ -251,6 +251,20 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     let brand = NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1) // #d97757, Anthropic's official "Orange" accent
     let amber = NSColor(srgbRed: 0.95, green: 0.73, blue: 0.18, alpha: 1) // "awaiting permission" yellow dot
+    // Per-session accent palette (locked order; white/black excluded — invisible on light/dark bars).
+    // palette[0] == brand (Clay), so a single session looks identical to the pre-palette build.
+    let palette: [NSColor] = [
+        NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1), // Clay   #D97757 (= brand)
+        NSColor(srgbRed: 0.173, green: 0.329, blue: 0.714, alpha: 1), // Cobalt #2C54B6
+        NSColor(srgbRed: 0.176, green: 0.549, blue: 0.620, alpha: 1), // Marine #2D8C9E
+        NSColor(srgbRed: 0.733, green: 0.608, blue: 0.118, alpha: 1), // Amber  #BB9B1E
+        NSColor(srgbRed: 0.478, green: 0.310, blue: 0.808, alpha: 1), // Iris   #7A4FCE
+        NSColor(srgbRed: 0.737, green: 0.196, blue: 0.294, alpha: 1), // Rose   #BC324B
+        NSColor(srgbRed: 0.624, green: 0.173, blue: 0.510, alpha: 1), // Orchid #9F2C82
+        NSColor(srgbRed: 0.216, green: 0.494, blue: 0.055, alpha: 1), // Fern   #377E0E
+    ]
+    let paletteNames = ["Clay", "Cobalt", "Marine", "Amber", "Iris", "Rose", "Orchid", "Fern"]
+    var sessionColors: [String: Int] = [:]  // session id -> palette index (runtime only; never persisted)
     let frames: [NSImage] = StatusController.loadFrames()
     let spriteFPS: Double = 9 // tune: 8 frames per loop -> ~0.9s/cycle
 
@@ -619,7 +633,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")  // the dim caret
         let tag = surfaceTag(s.entrypoint)
         v.configure(icon: sessionSymbol(s, eff: eff),
-                    iconTint: resting ? .tertiaryLabelColor : .labelColor,  // caret dim; spinner matches the name font; amber image ignores tint
+                    iconTint: resting ? .tertiaryLabelColor : (colorFor(s.id) ?? .labelColor),  // working/permission icon carries the session accent (nil in System mode = neutral); caret dim; amber image ignores tint
                     name: truncated(sessionName(s), max: nameMax, keep: nameMax),
                     timer: working ? elapsed(max(0, Int(now - s.startedAt))) : nil,
                     pillNormal: tag.isEmpty ? nil : pillImage(tag),
@@ -902,9 +916,11 @@ final class StatusController: NSObject, NSMenuDelegate {
         for (id, item) in sessionItems where !eligibleIds.contains(id) {
             NSStatusBar.system.removeStatusItem(item)
             sessionItems[id] = nil
+            releaseColor(id)   // return the accent to the pool (covers SessionEnd AND dead-pid reap)
             NSLog("Claude Sessions: -item \(id) (now \(sessionItems.count) session item(s))")
         }
         for s in eligible where sessionItems[s.id] == nil {
+            assignColor(s.id)  // assign once on first sighting; stable for life
             sessionItems[s.id] = makeSessionItem()
             NSLog("Claude Sessions: +item \(s.id) (now \(sessionItems.count) session item(s))")
         }
@@ -1031,15 +1047,35 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     // Render one session into its item. The frontmost (isLead) gets text+timer while working/awaiting
     // permission; every other item is glyph-only. The glyph still animates (driven by animStep).
+    // MARK: per-session color allocator (runtime only — never written to the JSON contract)
+
+    // Assign once on first sighting; stable for the session's life. Lowest FREE index first (so a
+    // freed hole is reclaimed); when all 8 are held, cycle from Clay (temporary duplicate until a slot frees).
+    func assignColor(_ id: String) {
+        guard sessionColors[id] == nil else { return }
+        let used = Set(sessionColors.values)
+        let free = (0..<palette.count).first { !used.contains($0) }
+        let idx = free ?? (sessionColors.count % palette.count)
+        sessionColors[id] = idx
+        NSLog("Claude Sessions: color +\(id) -> \(idx) \(paletteNames[idx])")
+    }
+    func releaseColor(_ id: String) {
+        if let i = sessionColors[id] { NSLog("Claude Sessions: color -\(id) (\(paletteNames[i]) freed)") }
+        sessionColors[id] = nil
+    }
+    // This session's accent, or nil (adaptive template) in System color mode.
+    func colorFor(_ id: String) -> NSColor? { iconSystem ? nil : palette[sessionColors[id] ?? 0] }
+
     func renderItem(_ item: NSStatusItem, _ s: Session, isLead: Bool, now: Double) {
         guard let button = item.button else { return }
         button.contentTintColor = nil // we paint the icon color ourselves; template-tint is unreliable
         button.toolTip = sessionMenuLine(s)
         let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
+        let c = colorFor(s.id)  // this session's accent (nil = adaptive template in System mode)
         switch eff {
-        case "permission":       button.image = dotIcon(color: amber)
-        case "thinking", "tool": button.image = iconImage(color: iconColor, frame: frameIdx)
-        default:                 button.image = restingIcon(color: iconColor)
+        case "permission":       button.image = dotIcon(color: amber)   // amber stays: cross-session "needs you" signal
+        case "thinking", "tool": button.image = iconImage(color: c, frame: frameIdx)
+        default:                 button.image = restingIcon(color: c)
         }
         let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")
         if isLead && !resting {
@@ -1075,8 +1111,8 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     func animStep() {
         frameIdx = (frameIdx + 1) % frameCount
-        let img = iconImage(color: iconColor, frame: frameIdx)
-        for id in workingIds { sessionItems[id]?.button?.image = img }
+        // Each working item animates in its own accent; the shared frameIdx keeps them in lockstep.
+        for id in workingIds { sessionItems[id]?.button?.image = iconImage(color: colorFor(id), frame: frameIdx) }
         // Keep the frontmost's elapsed clock ticking between ticks.
         if let lid = leadId, workingIds.contains(lid), let s = sessions[lid], let b = sessionItems[lid]?.button {
             applyTitle(b, base: statusText(s, eff: s.eff.isEmpty ? "tool" : s.eff), startedAt: s.startedAt)
