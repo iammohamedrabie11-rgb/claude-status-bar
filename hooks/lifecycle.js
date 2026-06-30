@@ -6,9 +6,9 @@ const os = require("os");
 const path = require("path");
 const cp = require("child_process");
 
-const BUNDLE_ID = "com.local.claudestatusbar";
-const EXEC = "ClaudeStatusBar";
-const dir = path.join(os.homedir(), ".claude", "statusbar");
+const BUNDLE_ID = "com.muhammed.claude-sessions";
+const EXEC = "ClaudeSessions";
+const dir = path.join(os.homedir(), ".claude", "sessions-bar");
 const stateDir = path.join(dir, "state.d");
 const event = process.argv[2];
 

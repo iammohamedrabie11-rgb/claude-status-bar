@@ -24,7 +24,7 @@ Also the [known issues and suggestions](https://github.com/m1ckc3s/claude-status
 You'll need macOS 12+, the Swift toolchain (Xcode Command Line Tools), and Node.js (the hooks run on Node).
 
 ```bash
-./build.sh          # -> build/ClaudeStatusBar.app
+./build.sh          # -> build/ClaudeSessions.app
 ./build.sh --dmg    # also builds a .dmg
 ```
 

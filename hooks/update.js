@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Maps a Claude Code hook event to this session's file: ~/.claude/statusbar/state.d/<session_id>.json
+// Maps a Claude Code hook event to this session's file: ~/.claude/sessions-bar/state.d/<session_id>.json
 // Usage: node update.js <prompt|pre|post|notify|permreq|stop>
 
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const dir = path.join(os.homedir(), ".claude", "statusbar");
+const dir = path.join(os.homedir(), ".claude", "sessions-bar");
 const stateDir = path.join(dir, "state.d");
 const event = process.argv[2] || "";
 
@@ -25,8 +25,8 @@ process.stdin.on("end", () => {
   let p = {};
   try { p = JSON.parse(raw || "{}"); } catch {}
 
-  // Off by default; CLAUDE_STATUSBAR_DEBUG=1 logs every hook invocation to hooks.log.
-  if (process.env.CLAUDE_STATUSBAR_DEBUG === "1") {
+  // Off by default; CLAUDE_SESSIONS_DEBUG=1 logs every hook invocation to hooks.log.
+  if (process.env.CLAUDE_SESSIONS_DEBUG === "1") {
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(path.join(dir, "hooks.log"),
