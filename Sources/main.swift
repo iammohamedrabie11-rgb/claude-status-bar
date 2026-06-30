@@ -193,7 +193,9 @@ final class SessionRowView: NSView {
 }
 
 final class StatusController: NSObject, NSMenuDelegate {
-    let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) // persistent anchor; visible only at zero sessions
+    var sessionItems: [String: NSStatusItem] = [:]  // one status item per live session, keyed by session_id
+    let sharedMenu = NSMenu()                        // one menu shared by the anchor + every per-session item
     let stateDir = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/sessions-bar/state.d")
     let claudeDesktopBundleID = "com.anthropic.claudefordesktop"
 
@@ -202,6 +204,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     var spinTimer: Timer?      // rotates the working-state spinner while the menu is open
     var spinAngle: CGFloat = 0
     var frameIdx = 0
+    var workingIds: [String] = []  // session ids currently animating (set each evaluate; consumed by animStep)
+    var leadId: String?            // frontmost session id — the one that gets text+timer
 
     let launchedAt = Date()
     var notNeededSince: Date?
@@ -244,9 +248,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     var turnStart: [String: Double] = [:]  // id -> active turn start (1-min sound gate)
     var menuIsOpen = false                  // refresh the dropdown's per-session timers only while open
     var sessionMenuItems: [(item: NSMenuItem, id: String)] = []
-    var activeBase = ""        // label without the elapsed clock
-    var startedAt: Double = 0  // unix seconds the current turn began (0 = no clock)
-    var activeColor: NSColor? = nil
 
     let brand = NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1) // #d97757, Anthropic's official "Orange" accent
     let amber = NSColor(srgbRed: 0.95, green: 0.73, blue: 0.18, alpha: 1) // "awaiting permission" yellow dot
@@ -298,10 +299,9 @@ final class StatusController: NSObject, NSMenuDelegate {
         if d.object(forKey: "iconSystem") != nil { iconSystem = d.bool(forKey: "iconSystem") }
         if d.object(forKey: "completionSound") != nil { playCompletionSound = d.bool(forKey: "completionSound") }
         if let s = d.string(forKey: "animStyle"), let st = AnimStyle(rawValue: s) { animStyle = st }
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
-        render(label: "", color: iconColor, animate: false, startedAt: 0)
+        sharedMenu.delegate = self
+        statusItem.menu = sharedMenu
+        renderResting(into: statusItem)
         let t = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
         pollTimer = t
@@ -499,7 +499,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         menu.addItem(toggleRow(title: "Show timer", isOn: showTimer) { [weak self] on in
             self?.showTimer = on
             UserDefaults.standard.set(on, forKey: "showTimer")
-            self?.applyTitle()
+            self?.evaluate() // re-render every item so the timer appears/disappears
         })
         menu.addItem(toggleRow(title: "Completion sound (1m+)", isOn: playCompletionSound) { [weak self] on in
             self?.playCompletionSound = on
@@ -887,26 +887,54 @@ final class StatusController: NSObject, NSMenuDelegate {
         for id in Array(soundPrev.keys) where sessions[id] == nil { soundPrev[id] = nil; turnStart[id] = nil }
         if chime, playCompletionSound { completionSound?.play() }
 
-        // Surface the single highest-priority session (permission > working > …); ties broken by
-        // recency, so within a tier the most recently active session wins.
+        // Frontmost (permission > working > …); ties broken by recency. It's one of many — every live
+        // session still gets its own item below; the lead just earns the text+timer treatment.
         let lead = sessions.values.max { a, b in
             let pa = priority(of: a.eff), pb = priority(of: b.eff)
             return pa == pb ? a.ts < b.ts : pa < pb
         }
-        statusItem.button?.toolTip = lead.map(sessionMenuLine)  // names repo + surface + state on hover
+        leadId = lead?.id
 
-        guard let lead = lead else { renderResting(); return }
-        switch lead.eff {
-        case "permission":
-            render(label: statusText(lead, eff: lead.eff), color: amber, animate: false, startedAt: 0, dot: true)
-        case "thinking", "tool":
-            render(label: statusText(lead, eff: lead.eff), color: iconColor, animate: true, startedAt: lead.startedAt)
-        default:
-            renderResting()
+        // One status item per live, surfaced session. Diff the live set against the existing items so
+        // we only create/remove the deltas (no teardown+rebuild → no flicker/leaks).
+        let eligible = iconSessions(now: now)
+        let eligibleIds = Set(eligible.map { $0.id })
+        for (id, item) in sessionItems where !eligibleIds.contains(id) {
+            NSStatusBar.system.removeStatusItem(item)
+            sessionItems[id] = nil
+            NSLog("Claude Sessions: -item \(id) (now \(sessionItems.count) session item(s))")
         }
+        for s in eligible where sessionItems[s.id] == nil {
+            sessionItems[s.id] = makeSessionItem()
+            NSLog("Claude Sessions: +item \(s.id) (now \(sessionItems.count) session item(s))")
+        }
+
+        // Anchor shows only when there are no per-session items, so the menu + Quit are always reachable.
+        statusItem.isVisible = sessionItems.isEmpty
+        if sessionItems.isEmpty { renderResting(into: statusItem) }
+
+        for s in eligible {
+            guard let item = sessionItems[s.id] else { continue }
+            renderItem(item, s, isLead: s.id == leadId, now: now)
+        }
+
+        // A single timer animates every working item in lockstep (shared frameIdx).
+        workingIds = eligible.filter { $0.eff == "thinking" || $0.eff == "tool" }.map { $0.id }
+        setAnimating(!workingIds.isEmpty)
     }
 
-    func renderResting() { render(label: "", color: iconColor, animate: false, startedAt: 0) }
+    // Live sessions that should get a menu-bar icon: every process-alive session that passes the
+    // desktop started-gate (a merely-opened, never-active claude-desktop session is suppressed). Idle-
+    // but-alive sessions are kept — the "Hide idle sessions" setting is a dropdown-only declutter.
+    func iconSessions(now: Double) -> [Session] {
+        sessions.values.filter { s in
+            let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
+            let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")
+            let gated = s.entrypoint == "claude-desktop"
+            return !gated || s.started || !resting
+        }.sorted { $0.ts > $1.ts }
+    }
+
 
     // Per-session effective state with two recovery nets: an absolute age cap, plus the transcript
     // "interrupted by user" marker (Esc / denied permission fire no hook, freezing the file). "done"
@@ -993,14 +1021,47 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     // MARK: render
 
-    func render(label: String, color: NSColor?, animate: Bool, startedAt: Double, dot: Bool = false) {
-        guard let button = statusItem.button else { return }
-        button.contentTintColor = nil // we paint the icon color ourselves; template-tint is unreliable
-        activeBase = label
-        activeColor = color
-        self.startedAt = startedAt
+    // A fresh status item for a session, sharing the one menu so any icon opens the full dropdown.
+    func makeSessionItem() -> NSStatusItem {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.menu = sharedMenu
+        item.button?.contentTintColor = nil
+        return item
+    }
 
-        if animate {
+    // Render one session into its item. The frontmost (isLead) gets text+timer while working/awaiting
+    // permission; every other item is glyph-only. The glyph still animates (driven by animStep).
+    func renderItem(_ item: NSStatusItem, _ s: Session, isLead: Bool, now: Double) {
+        guard let button = item.button else { return }
+        button.contentTintColor = nil // we paint the icon color ourselves; template-tint is unreliable
+        button.toolTip = sessionMenuLine(s)
+        let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
+        switch eff {
+        case "permission":       button.image = dotIcon(color: amber)
+        case "thinking", "tool": button.image = iconImage(color: iconColor, frame: frameIdx)
+        default:                 button.image = restingIcon(color: iconColor)
+        }
+        let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")
+        if isLead && !resting {
+            applyTitle(button, base: statusText(s, eff: eff), startedAt: s.startedAt)
+        } else {
+            button.imagePosition = .imageOnly
+            button.attributedTitle = NSAttributedString(string: "")
+        }
+    }
+
+    func renderResting(into item: NSStatusItem) {
+        guard let button = item.button else { return }
+        button.contentTintColor = nil
+        button.toolTip = nil
+        button.image = restingIcon(color: iconColor)
+        button.imagePosition = .imageOnly
+        button.attributedTitle = NSAttributedString(string: "")
+    }
+
+    // One timer drives every working item's frame (shared frameIdx → lockstep, like spinTick).
+    func setAnimating(_ on: Bool) {
+        if on {
             if animTimer == nil {
                 let t = Timer(timeInterval: 1.0 / fps, repeats: true) { [weak self] _ in self?.animStep() }
                 RunLoop.main.add(t, forMode: .common)
@@ -1009,21 +1070,21 @@ final class StatusController: NSObject, NSMenuDelegate {
         } else {
             animTimer?.invalidate(); animTimer = nil
             frameIdx = 0
-            button.image = dot ? dotIcon(color: color) : restingIcon(color: color)
         }
-        applyTitle()
-        if button.image == nil { button.image = dot ? dotIcon(color: color) : restingIcon(color: color) }
     }
 
     func animStep() {
         frameIdx = (frameIdx + 1) % frameCount
-        statusItem.button?.image = iconImage(color: activeColor, frame: frameIdx)
-        applyTitle() // refresh the elapsed clock
+        let img = iconImage(color: iconColor, frame: frameIdx)
+        for id in workingIds { sessionItems[id]?.button?.image = img }
+        // Keep the frontmost's elapsed clock ticking between ticks.
+        if let lid = leadId, workingIds.contains(lid), let s = sessions[lid], let b = sessionItems[lid]?.button {
+            applyTitle(b, base: statusText(s, eff: s.eff.isEmpty ? "tool" : s.eff), startedAt: s.startedAt)
+        }
     }
 
-    func applyTitle() {
-        guard let button = statusItem.button else { return }
-        var text = activeBase
+    func applyTitle(_ button: NSStatusBarButton, base: String, startedAt: Double) {
+        var text = base
         if showTimer, startedAt > 0 {
             text += "  " + elapsed(max(0, Int(Date().timeIntervalSince1970 - startedAt)))
         }
