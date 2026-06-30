@@ -15,7 +15,7 @@ Also the [known issues and suggestions](https://github.com/m1ckc3s/claude-status
 - Sending your conversation, files, or project to any API or relay.
 - Anything that costs money or needs an API key.
 - Usage meters, cost dashboards, analytics, or telemetry. Build a separate app for that; [Anthrocite](https://github.com/MarquesCoding/anthrocite) is one example to look into.
-- Heavy work in the hooks. They run on every event, so they write one small state file and exit: no network, no per-prompt API calls.
+- Heavy work in the hooks. They run on every event, so they write one small state file and exit: no network, no per-prompt API calls. (The per-session state-file shape is a locked contract — see [STATE.md](STATE.md).)
 - Hardcoding for one locale, provider, relay, or terminal.
 - New settings stores or dependencies for a minor feature when what's already there works.
 

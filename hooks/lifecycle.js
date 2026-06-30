@@ -16,6 +16,16 @@ fs.mkdirSync(stateDir, { recursive: true });
 
 const running = () => { try { cp.execSync(`pgrep -x ${EXEC}`, { stdio: "ignore" }); return true; } catch { return false; } };
 const safeId = (s) => String(s || "").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 64) || "unknown";
+// Best-effort current git branch of `cwd` (timeout-guarded; "" when not a repo). Detached HEAD → short SHA.
+// Computed once here at SessionStart; update.js carries it over and refreshes once per turn.
+const branchOf = (cwd) => {
+  if (!cwd) return "";
+  try {
+    const o = { cwd, stdio: ["ignore", "pipe", "ignore"], timeout: 500 };
+    const b = cp.execSync("git rev-parse --abbrev-ref HEAD", o).toString().trim();
+    return b === "HEAD" ? cp.execSync("git rev-parse --short HEAD", o).toString().trim() : b;
+  } catch { return ""; }
+};
 
 const writeAtomic = (file, obj) => {
   const tmp = file + "." + process.pid + ".tmp";
@@ -45,7 +55,7 @@ function run() {
     try {
       // started:false — a merely-opened conversation seeds this for launch + liveness but stays out of
       // the dropdown until it has real activity (update.js flips started:true on a prompt/tool).
-      writeAtomic(statePath, { state: "idle", label: "", tool: "", project: cwd ? path.basename(cwd) : "", sessionId: id, transcript: "", entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT || "", term_program: process.env.TERM_PROGRAM || "", pid: process.ppid, started: false, startedAt: 0, ts: Math.floor(Date.now() / 1000) });
+      writeAtomic(statePath, { state: "idle", label: "", tool: "", project: cwd ? path.basename(cwd) : "", git_branch: branchOf(cwd), sessionId: id, transcript: "", entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT || "", term_program: process.env.TERM_PROGRAM || "", pid: process.ppid, started: false, startedAt: 0, ts: Math.floor(Date.now() / 1000) });
     } catch {}
     cp.spawn("open", ["-g", "-b", BUNDLE_ID], { stdio: "ignore", detached: true }).unref();
   } else if (event === "end") {

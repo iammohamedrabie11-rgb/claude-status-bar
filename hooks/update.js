@@ -5,6 +5,18 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const cp = require("child_process");
+
+// Best-effort current git branch of `cwd` (timeout-guarded; "" when not a repo / git missing).
+// Detached HEAD → short SHA. Called sparingly (see git_branch below) per the lightweight-hooks rule.
+function branchOf(cwd) {
+  if (!cwd) return "";
+  try {
+    const o = { cwd, stdio: ["ignore", "pipe", "ignore"], timeout: 500 };
+    const b = cp.execSync("git rev-parse --abbrev-ref HEAD", o).toString().trim();
+    return b === "HEAD" ? cp.execSync("git rev-parse --short HEAD", o).toString().trim() : b;
+  } catch { return ""; }
+}
 
 const dir = path.join(os.homedir(), ".claude", "sessions-bar");
 const stateDir = path.join(dir, "state.d");
@@ -89,7 +101,18 @@ process.stdin.on("end", () => {
   // stable for the session's life, on both CLI and desktop). The app uses kill(pid,0) for liveness.
   // started:true — any update.js event (prompt/tool/permission/stop) is real activity, so the session
   // graduates from "merely opened" to visible in the dropdown. Clicking a conversation never fires here.
-  const out = { state, label, tool: p.tool_name || "", project, sessionId: p.session_id || "", transcript: p.transcript_path || prev.transcript || "", entrypoint, term_program: termProgram, pid: process.ppid, started: true, startedAt, ts };
+  // git_branch: recompute once per turn (prompt) where the cost is negligible; every other event carries
+  // it over from prev so per-tool-call events never shell out (lightweight-hooks rule, CONTRIBUTING.md).
+  const gitBranch = event === "prompt" ? branchOf(p.cwd) : (prev.git_branch || "");
+
+  // ── LOCKED per-session state contract (file: state.d/<session_id>.json; full doc in STATE.md). ──
+  //    Future features (N status items, color allocator, tab tint) read this shape — keep names stable.
+  //    state: idle|thinking|tool|permission|done · label: human string · tool: tool name (write-only)
+  //    project: basename(cwd) · git_branch: current branch ("" if not a repo) · entrypoint · term_program
+  //    transcript: transcript_path · pid: the session's `claude` proc (kill(pid,0) liveness; 0 = legacy)
+  //    started: bool (had real activity) · startedAt: unix s (turn start) · ts: unix s (last write)
+  //    sessionId: echo of session_id (write-only; the reader keys off the filename)
+  const out = { state, label, tool: p.tool_name || "", project, git_branch: gitBranch, sessionId: p.session_id || "", transcript: p.transcript_path || prev.transcript || "", entrypoint, term_program: termProgram, pid: process.ppid, started: true, startedAt, ts };
   try {
     fs.mkdirSync(stateDir, { recursive: true });
     const tmp = statePath + "." + process.pid + ".tmp";
