@@ -1,10 +1,10 @@
 <img width="672" height="80" alt="Screen Recording 2026-06-23 at 3 57 47 AM 2" src="https://github.com/user-attachments/assets/97876ac9-cd4f-431b-873a-93220de5bd99" />
 <br><br>
 
-<a href="https://github.com/m1ckc3s/claude-status-bar/releases/latest/download/ClaudeStatusBar.dmg"><img src="assets/download.png" alt="Download ClaudeStatusBar.dmg for macOS" width="260"></a>
+<a href="https://github.com/iammohamedrabie11-rgb/claude-status-bar/releases/latest/download/ClaudeSessions.dmg"><img src="assets/download.png" alt="Download ClaudeSessions.dmg for macOS" width="260"></a>
 <br>
 
-## Claude Status Bar
+## Claude Sessions
 
 A tiny macOS menu bar app that shows **Claude Code's live status**: an animated Claude icon while it's thinking or running a tool, a yellow dot when it's awaiting your permission, and the elapsed time of the current turn. Lightweight, no window, no dock icon, no usage dashboards.
 
@@ -62,8 +62,8 @@ Everything is controlled from the menu:
 
 Signed and notarized.
 
-1. Download the latest `ClaudeStatusBar.dmg` from [Releases](../../releases).
-2. Open it and drag **Claude Status Bar** into Applications.
+1. Download the latest `ClaudeSessions.dmg` from [Releases](../../releases).
+2. Open it and drag **Claude Sessions** into Applications.
 3. Launch it once. On first launch it wires up the Claude Code hooks for you automatically.
 4. Start a new Claude Code session, the icon appears whenever Claude Code is running.
 
@@ -79,11 +79,11 @@ Download the latest DMG and drag it into Applications (choose **Replace**). That
 Installs the hooks (status + open/close lifecycle) automatically from inside Claude Code:
 
 ```
-/plugin marketplace add m1ckc3s/claude-status-bar
-/plugin install claude-status-bar@claude-status-bar
+/plugin marketplace add iammohamedrabie11-rgb/claude-status-bar
+/plugin install claude-sessions@claude-sessions
 ```
 
-The plugin installs the hooks but not the app itself, so drag **Claude Status Bar** into Applications once (from the DMG). The plugin launches it automatically on session start.
+The plugin installs the hooks but not the app itself, so drag **Claude Sessions** into Applications once (from the DMG). The plugin launches it automatically on session start.
 
 ## How it works
 
@@ -98,7 +98,7 @@ Icon quitting right after you open it, not showing, or not moving in Cursor? See
 ## Uninstall
 
 ```bash
-node "/Applications/ClaudeStatusBar.app/Contents/Resources/uninstall.js"   # removes only our hooks
+node "/Applications/ClaudeSessions.app/Contents/Resources/uninstall.js"   # removes only our hooks
 ```
 Then drag the app to the Trash.
 

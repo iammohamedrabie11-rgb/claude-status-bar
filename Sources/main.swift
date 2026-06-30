@@ -194,7 +194,7 @@ final class SessionRowView: NSView {
 
 final class StatusController: NSObject, NSMenuDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    let stateDir = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/statusbar/state.d")
+    let stateDir = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/sessions-bar/state.d")
     let claudeDesktopBundleID = "com.anthropic.claudefordesktop"
 
     var pollTimer: Timer?
@@ -317,7 +317,7 @@ final class StatusController: NSObject, NSMenuDelegate {
               let installer = Bundle.main.path(forResource: "install", ofType: "js") else { return }
         DispatchQueue.global().async {
             guard let node = Self.locateNode() else {
-                NSLog("ClaudeStatusBar: could not find node; hooks not installed (will retry next launch)")
+                NSLog("Claude Sessions: could not find node; hooks not installed (will retry next launch)")
                 return
             }
             let task = Process()
@@ -367,8 +367,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     // MARK: update check
 
     var currentVersion: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0" }
-    let releaseAPIURL = "https://api.github.com/repos/m1ckc3s/claude-status-bar/releases/latest"
-    let releasePageURL = "https://github.com/m1ckc3s/claude-status-bar/releases/latest"
+    let releaseAPIURL = "https://api.github.com/repos/iammohamedrabie11-rgb/claude-status-bar/releases/latest"
+    let releasePageURL = "https://github.com/iammohamedrabie11-rgb/claude-status-bar/releases/latest"
 
     // Once/day: cache GitHub's latest release tag in UserDefaults. Nothing sent to us.
     func checkForUpdate() {
@@ -377,7 +377,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         if now - d.double(forKey: "lastUpdateCheck") < 86400 { return }
         guard let url = URL(string: releaseAPIURL) else { return }
         var req = URLRequest(url: url)
-        req.setValue("ClaudeStatusBar", forHTTPHeaderField: "User-Agent") // GitHub API requires a UA
+        req.setValue("ClaudeSessions", forHTTPHeaderField: "User-Agent") // GitHub API requires a UA
         URLSession.shared.dataTask(with: req) { data, _, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -600,10 +600,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         return line
     }
 
-    // Live layout knobs read fresh from ~/.claude/statusbar/uiconfig.json each render, so numeric
+    // Live layout knobs read fresh from ~/.claude/sessions-bar/uiconfig.json each render, so numeric
     // tweaks (timer column, pill offset, gap) take effect on the next menu open with NO rebuild.
     func uiConfig() -> [String: Double] {
-        let p = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/statusbar/uiconfig.json")
+        let p = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/sessions-bar/uiconfig.json")
         guard let d = FileManager.default.contents(atPath: p),
               let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [:] }
         return j.compactMapValues { ($0 as? NSNumber)?.doubleValue }

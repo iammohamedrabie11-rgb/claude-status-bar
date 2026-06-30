@@ -1,15 +1,15 @@
 {
-  "name": "claude-status-bar",
-  "owner": { "name": "Mick Cesanek" },
+  "name": "claude-sessions",
+  "owner": { "name": "Muhammed Rabea" },
   "description": "Menu bar status indicator for Claude Code.",
   "plugins": [
     {
-      "name": "claude-status-bar",
-      "displayName": "Claude Status Bar",
+      "name": "claude-sessions",
+      "displayName": "Claude Sessions",
       "source": "./",
       "description": "Menu bar indicator for Claude Code: animated spark, elapsed timer, and open/close lifecycle.",
       "version": "0.3.1",
-      "homepage": "https://github.com/m1ckc3s/claude-status-bar",
+      "homepage": "https://github.com/iammohamedrabie11-rgb/claude-status-bar",
       "license": "MIT"
     }
   ]
