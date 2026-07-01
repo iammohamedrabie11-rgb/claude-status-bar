@@ -268,7 +268,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     let frames: [NSImage] = StatusController.loadFrames()
     let spriteFPS: Double = 9 // tune: 8 frames per loop -> ~0.9s/cycle
 
-    enum AnimStyle: String { case web, code, crab }
+    enum AnimStyle: String { case web, code, crab } // .crab now renders the Invader glyph; rawValue kept for UserDefaults compat
     var animStyle: AnimStyle = .web
     var showTimer = false
     var iconSystem = false // false = brand Orange; true = adaptive black/white (template image)
@@ -286,23 +286,19 @@ final class StatusController: NSObject, NSMenuDelegate {
     let codeSub = 18            // sub-frames per glyph (tween smoothness)
     let codeCycle: Double = 3.8 // seconds for the full loop (lower = faster)
     lazy var codeGlyphMasks: [NSImage] = codeGlyphs.map { StatusController.glyphMask($0) }
-    let crabFPS: Double = 12.5 // matches the source GIF's 0.08s frame delay
-    lazy var crabFrames: [NSImage] = StatusController.decodePNGs(clawdCrabFramePNGs)
-    // Template frames: bright pixels (white eyes) become transparent holes so they're
-    // visible as negative space against the menu bar in System color mode.
-    lazy var crabTemplateFrames: [NSImage] = crabFrames.map { adaptiveCrabFrame($0) }
+    let invaderFPS: Double = 4.0 // 2-frame Space-Invader march (~2 steps/sec)
     var fps: Double {
         switch animStyle {
         case .web: return spriteFPS
         case .code: return Double(codeGlyphs.count * codeSub) / codeCycle
-        case .crab: return crabFPS
+        case .crab: return invaderFPS
         }
     }
     var frameCount: Int {
         switch animStyle {
         case .web: return max(1, frames.count)
         case .code: return codeGlyphs.count * codeSub
-        case .crab: return max(1, crabFrames.count)
+        case .crab: return 2 // Invader march alternates two frames (frameIdx % 2)
         }
     }
 
@@ -522,7 +518,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         let animParent = NSMenuItem(title: "Animation Style", action: nil, keyEquivalent: "")
         let animSub = NSMenu()
-        for (style, name) in [(AnimStyle.web, "Claude Spark"), (AnimStyle.code, "Claude Code"), (AnimStyle.crab, "Crab Walking")] {
+        for (style, name) in [(AnimStyle.web, "Claude Spark"), (AnimStyle.code, "Claude Code"), (AnimStyle.crab, "Invader")] {
             let it = NSMenuItem(title: name, action: #selector(chooseStyle(_:)), keyEquivalent: "")
             it.target = self
             it.representedObject = style.rawValue
@@ -1073,7 +1069,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
         let c = colorFor(s.id)  // this session's accent (nil = adaptive template in System mode)
         switch eff {
-        case "permission":       button.image = dotIcon(color: amber)   // amber stays: cross-session "needs you" signal
+        case "permission":       // amber stays: cross-session "needs you" signal. Invader style gets the
+                                 // hollow amber outline+dot; Spark/Code keep the amber dot (unchanged).
+                                 button.image = animStyle == .crab ? invaderIcon(.permission, color: amber)
+                                                                   : dotIcon(color: amber)
         case "thinking", "tool": button.image = iconImage(color: c, frame: frameIdx)
         default:                 button.image = restingIcon(color: c)
         }
@@ -1148,7 +1147,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     func iconImage(color: NSColor?, frame: Int) -> NSImage {
         if animStyle == .web { return tint(frames, color: color, frame: frame) }
-        if animStyle == .crab { return crabIcon(color: color, frame: frame) }
+        if animStyle == .crab { return invaderIcon(.working, color: color, frame: frame) }
         let i = (frame / codeSub) % codeGlyphs.count
         let local = (CGFloat(frame % codeSub) + 0.5) / CGFloat(codeSub) // 0…1 within this glyph
         // Scale envelope per glyph: rise, hold at peak, fall, so each lands before the swap.
@@ -1212,27 +1211,10 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     let logoSet: [NSImage] = Data(base64Encoded: claudeLogoPNG).flatMap(NSImage.init(data:)).map { [$0] } ?? []
     func restingIcon(color: NSColor?) -> NSImage {
-        if animStyle == .crab { return crabIcon(color: color, frame: 0) }
+        if animStyle == .crab { return invaderIcon(.idle, color: color) }
         return tint(logoSet.isEmpty ? frames : logoSet, color: color, frame: 0)
     }
 
-    // nil color (System) => adaptive shaded template (see adaptiveCrabFrame in CrabRender.swift);
-    // non-nil (Orange) => the original full-color sprite, drawn as-is.
-    func crabIcon(color: NSColor?, frame: Int) -> NSImage {
-        guard !crabFrames.isEmpty else { return NSImage(size: NSSize(width: 18, height: 18)) }
-        let pool = color == nil ? crabTemplateFrames : crabFrames
-        let src = pool[frame % pool.count]
-        let rep = src.representations.first
-        let pw = CGFloat(rep?.pixelsWide ?? Int(src.size.width))
-        let ph = CGFloat(rep?.pixelsHigh ?? Int(src.size.height))
-        let h: CGFloat = 18, w = (ph > 0 ? h * (pw / ph) : h)
-        let img = NSImage(size: NSSize(width: w, height: h), flipped: false) { rect in
-            src.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
-            return true
-        }
-        img.isTemplate = (color == nil)
-        return img
-    }
 
     func dotIcon(color: NSColor?) -> NSImage {
         let s: CGFloat = 18, d: CGFloat = 9
