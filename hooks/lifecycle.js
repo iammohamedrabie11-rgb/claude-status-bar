@@ -33,6 +33,18 @@ const writeAtomic = (file, obj) => {
   fs.renameSync(tmp, file);
 };
 
+// iTerm2 tab-color reset escape (proprietary OSC 6): returns the tab to the theme default.
+const ITERM_TAB_RESET = "\u001b]6;1;bg;*;default\u0007";
+// Resolve the tab's controlling tty from our parent (the claude process, which runs on the tab's pty).
+// "" when there's no tty (e.g. non-iTerm2). Normalized to /dev/ttysNNN.
+const ttyOf = (ppid) => {
+  try {
+    const t = cp.execSync("ps -o tty= -p " + ppid, { stdio: ["ignore", "pipe", "ignore"], timeout: 500 }).toString().trim();
+    if (!t || t === "??" || t === "?") return "";
+    return t.startsWith("/dev/") ? t : "/dev/" + t;
+  } catch { return ""; }
+};
+
 let input = "", done = false;
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => run());
@@ -50,15 +62,25 @@ function run() {
     // If the app isn't running, any leftover session files are stale (e.g. a prior
     // crash) — clear them so the count starts honest.
     if (!running()) { try { for (const f of fs.readdirSync(stateDir)) fs.rmSync(path.join(stateDir, f), { force: true }); } catch {} }
+    // iTerm2 tab identity: capture once here (sticky — update.js carries it forward). iTerm2 only.
+    const isIterm = process.env.TERM_PROGRAM === "iTerm.app";
+    const tty = isIterm ? ttyOf(process.ppid) : "";
+    const iterm_session_id = isIterm ? (process.env.ITERM_SESSION_ID || "") : "";
     // Seed an idle file: counts the session immediately, and clears any frozen state from a
     // resume (SessionStart fires on resume with no active turn).
     try {
       // started:false — a merely-opened conversation seeds this for launch + liveness but stays out of
       // the dropdown until it has real activity (update.js flips started:true on a prompt/tool).
-      writeAtomic(statePath, { state: "idle", label: "", tool: "", project: cwd ? path.basename(cwd) : "", git_branch: branchOf(cwd), sessionId: id, transcript: "", entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT || "", term_program: process.env.TERM_PROGRAM || "", pid: process.ppid, started: false, startedAt: 0, ts: Math.floor(Date.now() / 1000) });
+      writeAtomic(statePath, { state: "idle", label: "", tool: "", project: cwd ? path.basename(cwd) : "", git_branch: branchOf(cwd), sessionId: id, transcript: "", entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT || "", term_program: process.env.TERM_PROGRAM || "", tty, iterm_session_id, pid: process.ppid, started: false, startedAt: 0, ts: Math.floor(Date.now() / 1000) });
     } catch {}
     cp.spawn("open", ["-g", "-b", BUNDLE_ID], { stdio: "ignore", detached: true }).unref();
   } else if (event === "end") {
+    // Reset this session's iTerm2 tab color BEFORE dropping the file — the pty is still alive here, so
+    // this hook-side reset is the reliable one (the app's reap is a best-effort fallback).
+    try {
+      const prev = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      if (prev.term_program === "iTerm.app" && prev.tty) fs.writeFileSync(prev.tty, ITERM_TAB_RESET);
+    } catch {}
     // Removing the file drops this session from the aggregate — this is also what recovers a
     // frozen animation on force-quit (SessionEnd fires, but no Stop). No state rewrite needed.
     try { fs.rmSync(statePath, { force: true }); } catch {}

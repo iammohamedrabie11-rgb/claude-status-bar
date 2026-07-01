@@ -225,6 +225,8 @@ final class StatusController: NSObject, NSMenuDelegate {
                                 // conversation seeds started=false and stays out of the dropdown.
         var startedAt: Double, ts: Double
         var gitBranch: String = ""  // current git branch of the session's cwd ("" if not a repo) — part of the locked state contract (STATE.md)
+        var tty: String = ""        // iTerm2 tab's controlling tty ("/dev/ttysNNN"); "" if not iTerm2 — for the tab-tint escape (STATE.md)
+        var itermSessionId: String = "" // ITERM_SESSION_ID for iTerm2 sessions; "" otherwise (STATE.md)
         var eff: String = ""   // effective state, recomputed once per tick in evaluate()
 
         init(json o: [String: Any], id: String) {
@@ -240,6 +242,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             self.startedAt = (o["startedAt"] as? NSNumber)?.doubleValue ?? 0
             self.ts = (o["ts"] as? NSNumber)?.doubleValue ?? 0
             self.gitBranch = o["git_branch"] as? String ?? ""
+            self.tty = o["tty"] as? String ?? ""
+            self.itermSessionId = o["iterm_session_id"] as? String ?? ""
         }
     }
     var sessions: [String: Session] = [:]  // id -> latest parsed per-session state
@@ -265,6 +269,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     ]
     let paletteNames = ["Clay", "Cobalt", "Marine", "Amber", "Iris", "Rose", "Orchid", "Fern"]
     var sessionColors: [String: Int] = [:]  // session id -> palette index (runtime only; never persisted)
+    var sessionTTY: [String: String] = [:]   // session id -> iTerm2 tab tty (runtime only); kept so we can reset the tab on teardown, when the Session is already gone
     let frames: [NSImage] = StatusController.loadFrames()
     let spriteFPS: Double = 9 // tune: 8 frames per loop -> ~0.9s/cycle
 
@@ -912,12 +917,19 @@ final class StatusController: NSObject, NSMenuDelegate {
         for (id, item) in sessionItems where !eligibleIds.contains(id) {
             NSStatusBar.system.removeStatusItem(item)
             sessionItems[id] = nil
+            if let t = sessionTTY[id] { emitTabReset(tty: t) }  // best-effort; hook already reset on clean SessionEnd
+            sessionTTY[id] = nil
             releaseColor(id)   // return the accent to the pool (covers SessionEnd AND dead-pid reap)
             NSLog("Claude Sessions: -item \(id) (now \(sessionItems.count) session item(s))")
         }
         for s in eligible where sessionItems[s.id] == nil {
+            let firstAssign = sessionColors[s.id] == nil
             assignColor(s.id)  // assign once on first sighting; stable for life
             sessionItems[s.id] = makeSessionItem()
+            if !s.tty.isEmpty { sessionTTY[s.id] = s.tty }
+            // Tint this session's iTerm2 tab to its accent — once, when the color is first assigned, Orange
+            // mode only (colorFor is nil in System mode → skipped). Matches the allocator's assign-once discipline.
+            if firstAssign, s.termProgram == "iTerm.app", let c = colorFor(s.id) { emitTabTint(tty: s.tty, color: c) }
             NSLog("Claude Sessions: +item \(s.id) (now \(sessionItems.count) session item(s))")
         }
 
@@ -1061,6 +1073,24 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
     // This session's accent, or nil (adaptive template) in System color mode.
     func colorFor(_ id: String) -> NSColor? { iconSystem ? nil : palette[sessionColors[id] ?? 0] }
+
+    // MARK: iTerm2 tab tint — write the tab-color escape (OSC 6, iTerm2-proprietary) to the session's tty.
+    // A device write to /dev/ttysNNN needs no Automation grant (proven in the spike). All writes are tiny,
+    // off the main thread, and every error is swallowed — a tty write must never block or crash the app.
+    func emitTabTint(tty: String, color: NSColor) {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        let r = Int((c.redComponent * 255).rounded()), g = Int((c.greenComponent * 255).rounded()), b = Int((c.blueComponent * 255).rounded())
+        writeTTY(tty, "\u{1b}]6;1;bg;red;brightness;\(r)\u{7}\u{1b}]6;1;bg;green;brightness;\(g)\u{7}\u{1b}]6;1;bg;blue;brightness;\(b)\u{7}")
+    }
+    func emitTabReset(tty: String) { writeTTY(tty, "\u{1b}]6;1;bg;*;default\u{7}") }
+    func writeTTY(_ tty: String, _ s: String) {
+        guard !tty.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            guard let fh = FileHandle(forWritingAtPath: tty) else { return }  // no-op if the tty is gone / non-iTerm2
+            defer { try? fh.close() }
+            try? fh.write(contentsOf: Data(s.utf8))
+        }
+    }
 
     func renderItem(_ item: NSStatusItem, _ s: Session, isLead: Bool, now: Double) {
         guard let button = item.button else { return }

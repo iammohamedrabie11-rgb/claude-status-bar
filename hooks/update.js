@@ -104,6 +104,10 @@ process.stdin.on("end", () => {
   // git_branch: recompute once per turn (prompt) where the cost is negligible; every other event carries
   // it over from prev so per-tool-call events never shell out (lightweight-hooks rule, CONTRIBUTING.md).
   const gitBranch = event === "prompt" ? branchOf(p.cwd) : (prev.git_branch || "");
+  // iTerm2 tab identity (tty + ITERM_SESSION_ID): captured once at SessionStart, carried forward here —
+  // sticky, never re-derived per event (like git_branch's carry-over). Empty for non-iTerm2 sessions.
+  const tty = prev.tty || "";
+  const itermSessionId = prev.iterm_session_id || "";
 
   // ── LOCKED per-session state contract (file: state.d/<session_id>.json; full doc in STATE.md). ──
   //    Future features (N status items, color allocator, tab tint) read this shape — keep names stable.
@@ -112,7 +116,7 @@ process.stdin.on("end", () => {
   //    transcript: transcript_path · pid: the session's `claude` proc (kill(pid,0) liveness; 0 = legacy)
   //    started: bool (had real activity) · startedAt: unix s (turn start) · ts: unix s (last write)
   //    sessionId: echo of session_id (write-only; the reader keys off the filename)
-  const out = { state, label, tool: p.tool_name || "", project, git_branch: gitBranch, sessionId: p.session_id || "", transcript: p.transcript_path || prev.transcript || "", entrypoint, term_program: termProgram, pid: process.ppid, started: true, startedAt, ts };
+  const out = { state, label, tool: p.tool_name || "", project, git_branch: gitBranch, sessionId: p.session_id || "", transcript: p.transcript_path || prev.transcript || "", entrypoint, term_program: termProgram, tty, iterm_session_id: itermSessionId, pid: process.ppid, started: true, startedAt, ts };
   try {
     fs.mkdirSync(stateDir, { recursive: true });
     const tmp = statePath + "." + process.pid + ".tmp";
