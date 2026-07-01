@@ -3,6 +3,18 @@
 All notable changes to Claude Status Bar are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-01
+
+### Added
+- **One menu-bar icon per live session.** The bar now shows a separate icon for every running Claude Code session at once, each tracked independently by its session id, instead of surfacing a single session.
+- **Per-session colors.** Each session gets its own accent from an 8-color palette so you can tell them apart at a glance. A lone session keeps the familiar Clay/brand color, and colors are reclaimed as sessions end.
+- **iTerm2 tab tinting.** In iTerm2 (Orange mode), each session tints its own terminal tab to match its menu-bar accent and restores the default tab color when the session ends.
+- **git branch in session state.** Each session records its current git branch (blank outside a repo, short SHA when detached).
+
+### Changed
+- **Rebrand to Claude Sessions.** The app is now "Claude Sessions" with isolated runtime state under `~/.claude/sessions-bar/`, and its hooks pin a stable Node interpreter so upgrading Node no longer breaks the menu bar.
+- **State-aware Invader glyph replaces the crab.** A tintable Space-Invader now stands in for the pixel-art crab and reflects each session's state — resting when idle, marching while working, an amber outline when it needs your approval — adapting to your color theme.
+
 ## [0.3.1] - 2026-06-28
 
 ### Fixed
@@ -96,6 +108,7 @@ All notable changes to Claude Status Bar are documented here. This project follo
 - Signed and notarized DMG so it opens without a Gatekeeper warning.
 - Claude Code plugin marketplace manifest for the plugin install path.
 
+[0.4.0]: https://github.com/iammohamedrabie11-rgb/claude-status-bar/releases/tag/v0.4.0
 [0.3.1]: https://github.com/m1ckc3s/claude-status-bar/releases/tag/v0.3.1
 [0.3.0]: https://github.com/m1ckc3s/claude-status-bar/releases/tag/v0.3.0
 [0.2.2]: https://github.com/m1ckc3s/claude-status-bar/releases/tag/v0.2.2
